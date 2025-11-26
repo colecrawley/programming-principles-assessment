@@ -73,30 +73,42 @@ std::vector<char> RLECompression::compress(const std::vector<char>& data) {
  * @throws std::runtime_error if data is malformed (odd length or zero count)
  */
 std::vector<char> RLECompression::decompress(const std::vector<char>& data) {
-    // TODO: Implement decompression logic here
     std::vector<char> decompressed;
     
-    // Handle empty input
+    // handling emtpy input
     if (data.empty()) {
         return decompressed;
     }
     
-    // Validate data format (must have even number of bytes)
+    // checking length
     if (data.size() % 2 != 0) {
         throw std::runtime_error("Invalid RLE data: odd number of bytes");
     }
     
-    // Process each [count, byte] pair
+    // validating input
+    size_t estimatedSize = 0;
     for (size_t i = 0; i < data.size(); i += 2) {
         unsigned char count = static_cast<unsigned char>(data[i]);
-        char value = data[i + 1];
         
-        // Validate count
         if (count == 0) {
             throw std::runtime_error("Invalid RLE data: zero count");
         }
         
-        // Expand the run
+        estimatedSize += count;
+        
+        // protection of too much memory
+        if (estimatedSize > 1000000000) {
+            throw std::runtime_error("RLE decompression would exceed memory limits");
+        }
+    }
+    
+    decompressed.reserve(estimatedSize);
+    
+    // decompress
+    for (size_t i = 0; i < data.size(); i += 2) {
+        unsigned char count = static_cast<unsigned char>(data[i]);
+        char value = data[i + 1];
+        
         for (unsigned char j = 0; j < count; j++) {
             decompressed.push_back(value);
         }

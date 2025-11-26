@@ -68,7 +68,7 @@ void Server::start() {
     }
     
     // listening
-    if (listen(serverSocket, 8) < 0) {
+    if (listen(serverSocket, 128) < 0) {
         close(serverSocket);
         throw std::runtime_error("Failed to listen on socket");
     }
@@ -143,17 +143,33 @@ void Server::handleClient(int clientSocket) {
     // Your implementation goes here
 
     if (clientHandler) {
-        clientHandler(clientSocket);
+        try {
+            clientHandler(clientSocket);
+        } catch (const std::exception& e) {
+            std::cerr << "Client handler exception: " << e.what() << std::endl;
+            close(clientSocket);
+        } catch (...) {
+            std::cerr << "Unknown client handler exception" << std::endl;
+            close(clientSocket);
+        }
         return;
     }
     
     // echo behaviour
-    char buffer[4096];
-    ssize_t bytesRead = read(clientSocket, buffer, sizeof(buffer));
-    
-    if (bytesRead > 0) {
-        // echo back to client
-        send(clientSocket, buffer, bytesRead, 0);
+    try {
+        char buffer[4096];
+        ssize_t bytesRead = read(clientSocket, buffer, sizeof(buffer));
+        
+        if (bytesRead > 0) {
+            ssize_t bytesSent = send(clientSocket, buffer, bytesRead, 0);
+            if (bytesSent < 0) {
+                std::cerr << "Failed to send data to client" << std::endl;
+            }
+        } else if (bytesRead < 0) {
+            std::cerr << "Failed to read from client" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error handling client: " << e.what() << std::endl;
     }
 
     close(clientSocket);
@@ -206,6 +222,11 @@ void Server::acceptLoop() {
         }
         
         // handle client in different thread
-        std::thread(&Server::handleClient, this, clientSocket).detach();
+        try {
+            std::thread(&Server::handleClient, this, clientSocket).detach();
+        } catch (const std::system_error& e) {
+            std::cerr << "Failed to create thread for client: " << e.what() << std::endl;
+            close(clientSocket);
+        }
     }
 }

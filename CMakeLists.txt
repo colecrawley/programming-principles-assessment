@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(compression
     src/RLECompression.cpp
+    src/huffman.cpp
     src/FileHandler.cpp
     src/Server.cpp
     src/Client.cpp
