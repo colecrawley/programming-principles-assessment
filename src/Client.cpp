@@ -42,7 +42,42 @@ Client::~Client() {
 bool Client::connect() {
     // TODO: Implement connection logic here
     // Your implementation goes here
-    return false;
+
+    if (connected) {
+        return true;
+    }
+    
+    // Create TCP socket
+    clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket < 0) {
+        std::cerr << "Failed to create socket" << std::endl;
+        return false;
+    }
+    
+    // Set up server address
+    sockaddr_in serverAddr;
+    std::memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+    
+    // Convert IP address from string to binary
+    if (inet_pton(AF_INET, host.c_str(), &serverAddr.sin_addr) <= 0) {
+        std::cerr << "Invalid address / Address not supported" << std::endl;
+        close(clientSocket);
+        clientSocket = -1;
+        return false;
+    }
+    
+    // Connect to server
+    if (::connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        std::cerr << "Connection failed" << std::endl;
+        close(clientSocket);
+        clientSocket = -1;
+        return false;
+    }
+    
+    connected = true;
+    return true;
 }
 
 /**
@@ -61,6 +96,12 @@ bool Client::connect() {
 void Client::disconnect() {
     // TODO: Implement disconnection logic here
     // Your implementation goes here
+
+    if (connected && clientSocket >= 0) {
+        close(clientSocket);
+        clientSocket = -1;
+        connected = false;
+    }
 }
 
 /**
@@ -82,7 +123,38 @@ void Client::disconnect() {
 bool Client::sendData(const std::vector<char>& data) {
     // TODO: Implement data sending logic here
     // Your implementation goes here
-    return false;
+
+    // double check its connected still
+    if (!connected || clientSocket < 0) {
+        std::cerr << "Not connected to server" << std::endl;
+        return false;
+    }
+    
+    size_t totalSent = 0;
+    const char* ptr = data.data();
+
+    // send the data
+    while (totalSent < data.size()) {
+        ssize_t bytesSent = send(clientSocket, 
+                                  ptr + totalSent, 
+                                  data.size() - totalSent, 
+                                  0);
+    
+    // double check the sent data
+    if (bytesSent < 0) {
+        std::cerr << "Failed to send data" << std::endl;
+        return false;
+    }
+    
+    if (bytesSent == 0) {
+            std::cerr << "Connection closed during send" << std::endl;
+            return false;
+        }
+        
+        totalSent += bytesSent;
+    }
+    
+    return true;
 }
 
 /**
@@ -104,5 +176,36 @@ bool Client::sendData(const std::vector<char>& data) {
 std::vector<char> Client::receiveData(size_t maxSize) {
     // TODO: Implement data receiving logic here
     // Your implementation goes here
-    return {};
+
+    std::vector<char> buffer;
+    
+    // Check if connected
+    if (!connected || clientSocket < 0) {
+        std::cerr << "Not connected to server" << std::endl;
+        return buffer;
+    }
+    
+    // Prepare buffer
+    buffer.resize(maxSize);
+    
+    // Receive data
+    ssize_t bytesRead = read(clientSocket, buffer.data(), maxSize);
+    
+    // Handle errors
+    if (bytesRead < 0) {
+        std::cerr << "Failed to receive data" << std::endl;
+        buffer.clear();
+        return buffer;
+    }
+    
+    if (bytesRead == 0) {
+        // Connection closed by server
+        buffer.clear();
+        return buffer;
+    }
+    
+    // Resize buffer to actual bytes received
+    buffer.resize(bytesRead);
+    
+    return buffer;
 }

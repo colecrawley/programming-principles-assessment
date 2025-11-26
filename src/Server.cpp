@@ -42,7 +42,42 @@ Server::~Server() {
 void Server::start() {
     // TODO: Implement server start logic here
     // Your implementation goes here
-    throw std::runtime_error("Server::start not implemented");
+
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0) {
+         throw std::runtime_error("Server::start not implemented");
+    }
+
+    // quick start
+    int opt = 1;
+    if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        close(serverSocket);
+        throw std::runtime_error("Failed to set SO_REUSEADDR");
+    }
+    
+    // bind socket to the address
+    sockaddr_in serverAddr;
+    std::memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(port);
+    
+    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        close(serverSocket);
+        throw std::runtime_error("Failed to bind socket to port " + std::to_string(port));
+    }
+    
+    // listening
+    if (listen(serverSocket, 8) < 0) {
+        close(serverSocket);
+        throw std::runtime_error("Failed to listen on socket");
+    }
+    
+    // run flag
+    running = true;
+    
+    // accept loop
+    serverThread = std::thread(&Server::acceptLoop, this);
 }
 
 /**
@@ -64,6 +99,25 @@ void Server::start() {
 void Server::stop() {
     // TODO: Implement server stop logic here
     // Your implementation goes here
+
+    if (!running) {
+        return;
+    }
+    
+    // signal thread
+    running = false;
+    
+    // close server
+    if (serverSocket >= 0) {
+        shutdown(serverSocket, SHUT_RDWR);
+        close(serverSocket);
+        serverSocket = -1;
+    }
+    
+    // wait for accept thread
+    if (serverThread.joinable()) {
+        serverThread.join();
+    }
 }
 
 /**
@@ -87,6 +141,21 @@ void Server::stop() {
 void Server::handleClient(int clientSocket) {
     // TODO: Implement client handling logic here
     // Your implementation goes here
+
+    if (clientHandler) {
+        clientHandler(clientSocket);
+        return;
+    }
+    
+    // echo behaviour
+    char buffer[4096];
+    ssize_t bytesRead = read(clientSocket, buffer, sizeof(buffer));
+    
+    if (bytesRead > 0) {
+        // echo back to client
+        send(clientSocket, buffer, bytesRead, 0);
+    }
+
     close(clientSocket);
 }
 
@@ -119,4 +188,24 @@ void Server::setHandler(std::function<void(int)> handler) {
 void Server::acceptLoop() {
     // TODO: Implement accept loop logic here
     // Your implementation goes here
+
+    while (running) {
+        sockaddr_in clientAddr;
+        socklen_t clientLen = sizeof(clientAddr);
+        
+        // accept connection
+        int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientLen);
+        
+        if (clientSocket < 0) {
+            // check is the server is running
+            if (!running) {
+                break;
+            }
+            std::cerr << "Failed to accept client connection" << std::endl;
+            continue;
+        }
+        
+        // handle client in different thread
+        std::thread(&Server::handleClient, this, clientSocket).detach();
+    }
 }

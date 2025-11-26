@@ -21,9 +21,36 @@
  */
 std::vector<char> RLECompression::compress(const std::vector<char>& data) {
     // TODO: Implement compression logic here
-    std::vector<char> out;
+    std::vector<char> compressed;
     // Your implementation goes here
-    return out;
+
+    // handling empty input
+    if (data.empty()) {
+        return compressed;
+    }
+    
+    // reserving space
+    compressed.reserve(data.size());
+    
+    size_t i = 0;
+    while (i < data.size()) {
+        char currentByte = data[i];
+        unsigned char count = 1;
+        
+        // counting consecutive bytes
+        while (i + count < data.size() && 
+               data[i + count] == currentByte && 
+               count < 255) {
+            count++;
+        }
+        
+        compressed.push_back(static_cast<char>(count));
+        compressed.push_back(currentByte);
+        
+        i += count;
+    }
+    
+    return compressed;
 }
 
 /**
@@ -47,7 +74,33 @@ std::vector<char> RLECompression::compress(const std::vector<char>& data) {
  */
 std::vector<char> RLECompression::decompress(const std::vector<char>& data) {
     // TODO: Implement decompression logic here
-    std::vector<char> out;
-    // Your implementation goes here
-    return out;
+    std::vector<char> decompressed;
+    
+    // Handle empty input
+    if (data.empty()) {
+        return decompressed;
+    }
+    
+    // Validate data format (must have even number of bytes)
+    if (data.size() % 2 != 0) {
+        throw std::runtime_error("Invalid RLE data: odd number of bytes");
+    }
+    
+    // Process each [count, byte] pair
+    for (size_t i = 0; i < data.size(); i += 2) {
+        unsigned char count = static_cast<unsigned char>(data[i]);
+        char value = data[i + 1];
+        
+        // Validate count
+        if (count == 0) {
+            throw std::runtime_error("Invalid RLE data: zero count");
+        }
+        
+        // Expand the run
+        for (unsigned char j = 0; j < count; j++) {
+            decompressed.push_back(value);
+        }
+    }
+    
+    return decompressed;
 }

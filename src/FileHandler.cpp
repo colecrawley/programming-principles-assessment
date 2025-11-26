@@ -21,9 +21,25 @@
  * @throws std::runtime_error if the file cannot be opened
  */
 std::vector<char> FileHandler::readFile(const std::string& filename) {
-    // TODO: Implement file reading logic here
-    // Your implementation goes here
-    throw std::runtime_error("readFile not implemented");
+    // opening the file in bin mode
+    std::ifstream file(filename, std::ios::binary | std::ios::ate);
+    
+    // checks
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file for reading: " + filename);
+    }
+    
+    // check file suze
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    
+    // read file into a vector
+    std::vector<char> buffer(size);
+    if (!file.read(buffer.data(), size)) {
+        throw std::runtime_error("Failed to read file: " + filename);
+    }
+    
+    return buffer;
 }
 
 /**
@@ -45,7 +61,19 @@ std::vector<char> FileHandler::readFile(const std::string& filename) {
  * @throws std::runtime_error if the file cannot be opened for writing
  */
 void FileHandler::writeFile(const std::string& filename, const std::vector<char>& data) {
-    // TODO: Implement file writing logic here
-    // Your implementation goes here
-    throw std::runtime_error("writeFile not implemented");
+    // opening file in bin mode
+    std::ofstream file(filename, std::ios::binary);
+    
+    // checks
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file for writing: " + filename);
+    }
+    
+    // writing
+    file.write(data.data(), data.size());
+    
+    // write errors?
+    if (!file.good()) {
+        throw std::runtime_error("Failed to write file: " + filename);
+    }
 }
