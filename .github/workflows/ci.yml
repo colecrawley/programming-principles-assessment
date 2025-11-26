@@ -1,0 +1,140 @@
+name: C++ CI
+on: [push, pull_request]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y build-essential cmake git
+    - name: Check for required secrets
+      run: |
+        if [ -z "${{ secrets.GH_APP_ID }}" ]; then
+          echo "Error: GH_APP_ID secret is not set. Please configure the GitHub App ID as an organization secret."
+          exit 1
+        fi
+        if [ -z "${{ secrets.GH_APP_PRIVATE_KEY }}" ]; then
+          echo "Error: GH_APP_PRIVATE_KEY secret is not set. Please configure the GitHub App private key as an organization secret."
+          exit 1
+        fi
+        echo "Required secrets are present."
+    
+    - name: Generate JWT for GitHub App
+      id: generate-jwt
+      run: |
+        # Create a temporary file for the private key (preserve newlines)
+        PRIVATE_KEY_FILE=$(mktemp)
+        printf '%s\n' "${{ secrets.GH_APP_PRIVATE_KEY }}" > "$PRIVATE_KEY_FILE"
+        chmod 600 "$PRIVATE_KEY_FILE"
+
+        # Generate JWT (valid for 10 minutes)
+        NOW=$(date +%s)
+        IAT=$((NOW - 60))  # Issued 60s in the past to allow for clock drift
+        EXP=$((NOW + 600)) # Expires in 10 minutes
+
+        # Create JWT header
+        HEADER='{"alg":"RS256","typ":"JWT"}'
+        HEADER_B64=$(echo -n "$HEADER" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+
+        # Create JWT payload - ensure iss is a number (no quotes)
+        PAYLOAD=$(printf '{"iat":%d,"exp":%d,"iss":%s}' "$IAT" "$EXP" "${{ secrets.GH_APP_ID }}")
+        PAYLOAD_B64=$(echo -n "$PAYLOAD" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+
+        # Create signature
+        SIGNATURE=$(echo -n "${HEADER_B64}.${PAYLOAD_B64}" | openssl dgst -sha256 -sign "$PRIVATE_KEY_FILE" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+
+        # Combine to create JWT
+        JWT="${HEADER_B64}.${PAYLOAD_B64}.${SIGNATURE}"
+
+        # Clean up private key file
+        rm -f "$PRIVATE_KEY_FILE"
+
+        # Mask and export JWT
+        echo "::add-mask::$JWT"
+        echo "JWT=$JWT" >> $GITHUB_ENV
+        echo "JWT generated successfully."
+    
+    - name: Get installation access token
+      id: get-token
+      run: |
+        # If GH_APP_INSTALLATION_ID is provided, use it directly
+        if [ -n "${{ secrets.GH_APP_INSTALLATION_ID }}" ]; then
+          echo "Using provided installation ID."
+          INSTALLATION_ID="${{ secrets.GH_APP_INSTALLATION_ID }}"
+        else
+          echo "Discovering installation ID for organization UoL-SoCS..."
+          # Get installations for the app
+          INSTALLATIONS_RESPONSE=$(curl -s -H "Authorization: Bearer $JWT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/app/installations")
+          
+          # Find installation ID for UoL-SoCS organization
+          INSTALLATION_ID=$(echo "$INSTALLATIONS_RESPONSE" | jq -r '.[] | select(.account.login == "UoL-SoCS") | .id')
+          
+          if [ -z "$INSTALLATION_ID" ] || [ "$INSTALLATION_ID" = "null" ]; then
+            echo "Error: Could not find installation ID for UoL-SoCS organization."
+            echo "Please ensure the GitHub App is installed for the organization or provide GH_APP_INSTALLATION_ID secret."
+            exit 1
+          fi
+          echo "Found installation ID: $INSTALLATION_ID"
+        fi
+        
+        # Request an installation access token
+        echo "Requesting installation access token..."
+        TOKEN_RESPONSE=$(curl -s -X POST \
+          -H "Authorization: Bearer $JWT" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens")
+        
+        INSTALLATION_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token')
+        
+        if [ -z "$INSTALLATION_TOKEN" ] || [ "$INSTALLATION_TOKEN" = "null" ]; then
+          echo "Error: Failed to obtain installation access token."
+          echo "Response: $TOKEN_RESPONSE"
+          exit 1
+        fi
+        
+        # Mask the token from logs and store in environment
+        echo "::add-mask::$INSTALLATION_TOKEN"
+        echo "INSTALLATION_TOKEN=$INSTALLATION_TOKEN" >> $GITHUB_ENV
+        echo "Installation access token obtained successfully."
+    
+    - name: Fetch hidden tests
+      run: |
+        echo "Cloning hidden tests repository..."
+        if git clone https://x-access-token:${INSTALLATION_TOKEN}@github.com/UoL-SoCS/compression-assignment-hidden.git hidden-repo 2>&1; then
+          echo "Successfully cloned hidden repository"
+          if [ -d "hidden-repo" ]; then
+            echo "Contents of hidden-repo:"
+            ls -la hidden-repo/
+            if ls hidden-repo/*.cpp 1> /dev/null 2>&1; then
+              echo "Copying test files to tests/ directory..."
+              cp -v hidden-repo/*.cpp tests/
+              echo "Hidden test files copied successfully"
+              echo "Contents of tests/ directory:"
+              ls -la tests/
+            else
+              echo "Warning: No .cpp files found in hidden repository"
+            fi
+            # Clean up cloned repository to avoid git conflicts
+            echo "Cleaning up hidden-repo directory..."
+            rm -rf hidden-repo
+          else
+            echo "Error: hidden-repo directory not found after clone"
+            exit 1
+          fi
+        else
+          echo "Error: Failed to clone hidden repository"
+          exit 1
+        fi
+    - name: Verify test files before configuration
+      run: |
+        echo "Test files that will be built:"
+        ls -1 tests/*.cpp
+        echo "Total test files: $(ls -1 tests/*.cpp | wc -l)"
+    - name: Configure
+      run: cmake -S . -B build
+    - name: Build
+      run: cmake --build build -j
+    - name: Run tests
+      run: ctest --test-dir build --output-on-failure
